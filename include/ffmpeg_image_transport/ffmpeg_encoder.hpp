@@ -27,6 +27,7 @@
 
 #include "ffmpeg_image_transport/tdiff.hpp"
 #include "ffmpeg_image_transport/types.hpp"
+#include "ffmpeg_image_transport/cuda_encoder.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -36,6 +37,8 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 #include <libswscale/swscale.h>
+#include <libavutil/hwcontext_cuda.h>
+#include <libavutil/log.h>
 }
 
 namespace ffmpeg_image_transport
@@ -104,6 +107,9 @@ public:
     return (codecContext_ != NULL);
   }
   bool initialize(int width, int height, Callback callback);
+  bool setInputFormat(AVPixelFormat format);
+  bool setPixFormat(AVPixelFormat format);
+  bool setUseHWFrames(bool use_hw_frames);
   void setLogger(rclcpp::Logger logger) { logger_ = logger; }
   void setParameters(rclcpp::Node * node);
   void reset();
@@ -130,7 +136,10 @@ private:
   std::string profile_;    // e.g. "main", "high", "rext"
   int qmax_{0};            // max allowed quantization. The lower the better quality
   int GOPSize_{15};        // distance between two keyframes
-  AVPixelFormat pixFormat_{AV_PIX_FMT_YUV420P};
+  AVPixelFormat pixFormat_{AV_PIX_FMT_YUV420P}; // use AV_PIX_FMT_CUDA for hw frames
+  AVPixelFormat inputFormat_{AV_PIX_FMT_BGR24};
+  AVPixelFormat hwFormat_{AV_PIX_FMT_YUV420P}; // standard nvenc format
+  bool use_hw_frames_{false};
   AVRational timeBase_{1, 100};
   AVRational frameRate_{100, 1};
   int64_t bitRate_{1000000};
@@ -154,6 +163,11 @@ private:
   TDiff tdiffCopyOut_;
   TDiff tdiffPublish_;
   TDiff tdiffTotal_;
+  // cuda things
+	struct cuda_vars *gpu_vars_ = NULL;
+  uint8_t* pRGB; 
+  uint8_t* pYUV_; 
+  cudaSurfaceObject_t pYUVSurf_ = 0;
 };
 }  // namespace ffmpeg_image_transport
 #endif  // FFMPEG_IMAGE_TRANSPORT__FFMPEG_ENCODER_HPP_

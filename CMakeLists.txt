@@ -21,6 +21,7 @@ else()
   message(ERROR "ROS_DISTRO environment variable is not set!")
 endif()
 
+
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_ros REQUIRED)
 find_package(image_transport REQUIRED)
@@ -51,6 +52,44 @@ pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
 
 set(LIBRARY_NAME ${PROJECT_NAME}_component)
 
+
+
+###### Cuda ######
+set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+set(CUDA_LIBRARIES "libcuda.so")
+enable_language(CUDA)
+find_package(CUDA  REQUIRED)
+include_directories("${CUDA_INCLUDE_DIRS}")
+
+
+
+
+add_library(cuda_encoder SHARED src/cuda_encoder.cu)
+target_include_directories(cuda_encoder PRIVATE include)
+target_include_directories(cuda_encoder PRIVATE /usr/local/cuda/include/)
+target_compile_options(cuda_encoder PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                       --disable-warnings
+                       >)
+
+install(TARGETS cuda_encoder EXPORT export_cuda_encoder
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+ament_export_targets(export_cuda_encoder)
+
+add_executable(test_cuda src/test.cu)
+install(TARGETS test_cuda RUNTIME DESTINATION bin)
+
+add_executable(test_hw_frames src/test_hw_frames.cpp)
+target_include_directories(test_hw_frames PRIVATE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  /usr/local/cuda/include/)
+target_link_libraries(test_hw_frames PkgConfig::LIBAV cuda_encoder ${CUDA_LIBRARIES})
+install(TARGETS test_hw_frames RUNTIME DESTINATION bin)
+
+###### END Cuda ######
+
 add_library(
   ${LIBRARY_NAME}
   SHARED
@@ -63,7 +102,8 @@ add_library(
 
 target_include_directories(${LIBRARY_NAME} PRIVATE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>")
+  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  /usr/local/cuda/include/)
 
 ament_target_dependencies(${LIBRARY_NAME}
   cv_bridge
@@ -73,7 +113,7 @@ ament_target_dependencies(${LIBRARY_NAME}
   sensor_msgs
   ffmpeg_image_transport_msgs)
 
-target_link_libraries(${LIBRARY_NAME} opencv_imgproc PkgConfig::LIBAV)
+target_link_libraries(${LIBRARY_NAME} opencv_imgproc PkgConfig::LIBAV cuda_encoder ${CUDA_LIBRARIES})
 
 add_executable(test_encoder
   test/test_encoder.cpp)

@@ -24,9 +24,13 @@
 
 #include "ffmpeg_image_transport/safe_param.hpp"
 
+
 namespace ffmpeg_image_transport
 {
-FFMPEGEncoder::FFMPEGEncoder() : logger_(rclcpp::get_logger("FFMPEGEncoder")) {}
+FFMPEGEncoder::FFMPEGEncoder() : logger_(rclcpp::get_logger("FFMPEGEncoder")) {
+  rcutils_logging_set_logger_level(logger_.get_name(), RCUTILS_LOG_SEVERITY_DEBUG);
+  av_log_set_level(AV_LOG_DEBUG);
+}
 
 FFMPEGEncoder::~FFMPEGEncoder()
 {
@@ -76,7 +80,34 @@ bool FFMPEGEncoder::initialize(int width, int height, Callback callback)
 {
   Lock lock(mutex_);
   callback_ = callback;
-  return (openCodec(width, height));
+
+  auto ret = openCodec(width, height);
+  // auto device_ctx = (AVHWDeviceContext*) codecContext_->hw_device_ctx->data;
+  // auto av_cuda_ctx = (AVCUDADeviceContext*) device_ctx->hwctx;
+  // auto cuda_ctx = (CUcontext*) av_cuda_ctx->cuda_ctx;
+
+  // cudaSetDevice(0);
+
+
+  return ret;
+}
+
+bool FFMPEGEncoder::setInputFormat(AVPixelFormat format){
+  inputFormat_ = format;
+  RCLCPP_INFO_STREAM(
+    logger_, "inputFormat_: " << inputFormat_);
+}
+
+bool FFMPEGEncoder::setPixFormat(AVPixelFormat format){
+  pixFormat_ = format;
+  RCLCPP_INFO_STREAM(
+    logger_, "pixFormat_: " << pixFormat_);
+}
+
+bool FFMPEGEncoder::setUseHWFrames(bool use_hw_frames){
+  use_hw_frames_ = use_hw_frames;
+  RCLCPP_INFO_STREAM(
+    logger_, "use_hw_frames_: " << use_hw_frames_);
 }
 
 bool FFMPEGEncoder::openCodec(int width, int height)
@@ -120,7 +151,11 @@ bool FFMPEGEncoder::openCodec(int width, int height)
     // encoded pixel format. Must be supported by encoder
     // check with e.g.: ffmpeg -h encoder=h264_nvenc -pix_fmts
 
-    codecContext_->pix_fmt = pixFormat_;
+    if (use_hw_frames_){
+      codecContext_->pix_fmt = AV_PIX_FMT_CUDA;
+    } else {
+      codecContext_->pix_fmt = pixFormat_;
+    }
 
     if (
       av_opt_set(codecContext_->priv_data, "profile", profile_.c_str(), AV_OPT_SEARCH_CHILDREN) !=
@@ -144,6 +179,65 @@ bool FFMPEGEncoder::openCodec(int width, int height)
          RCLCPP_ERROR_STREAM(logger_, "cannot set surfaces!");
          }
       */
+
+    // Check if using hw frames
+    if (use_hw_frames_){
+      // must initialize the hw_frames_ctx
+      AVBufferRef *hw_frames_ref;
+      AVBufferRef *hw_device_context;
+      if (av_hwdevice_ctx_create(&hw_device_context, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, 0)){
+        throw(std::runtime_error("cannot create hwdevice context!"));
+      }
+      hw_frames_ref = av_hwframe_ctx_alloc(hw_device_context); // hw_device_context remains in my ownership
+
+      if (hw_frames_ref == NULL){
+        throw(std::runtime_error("cannot allocate hwframe context!"));
+      }
+
+      // set up frame info
+      auto frame_ctx = (AVHWFramesContext*) hw_frames_ref->data;
+      frame_ctx->format = AV_PIX_FMT_CUDA;
+      frame_ctx->sw_format = AV_PIX_FMT_YUV420P;
+      frame_ctx->width = width;
+      frame_ctx->height = height;
+
+      // finalize hw_frames_ref for use
+      av_hwframe_ctx_init(hw_frames_ref); 
+
+      // set the hw_frames_ctx
+      codecContext_->hw_frames_ctx = hw_frames_ref;
+
+      //// setup cuda
+      // init the bayer2rgb kernel
+      RCLCPP_INFO_STREAM(logger_, "initializing cuda_debayer. Width: " << width << " Height: " << height);
+      auto ret_cuda = bayer2rgb_init(&gpu_vars_, width, height, 3, false); // RGB24 has 3 bytes per pixel
+      if (ret_cuda != cudaSuccess) {
+        RCLCPP_ERROR_STREAM(logger_, "cannot init cuda_debayer: " << cudaGetErrorString(ret_cuda));
+        throw(std::runtime_error("cannot init cuda_debayer"));
+      }
+
+      // Allocate CUDA arrays in device memory
+      // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#surface-memory
+      cudaChannelFormatDesc channelDesc =
+          cudaCreateChannelDesc(8, 0, 0, 0, cudaChannelFormatKindUnsigned);
+      cudaArray_t cuInputArray;
+      cudaMallocArray(&cuInputArray, &channelDesc, width, (size_t) height * 1.5,
+                      cudaArraySurfaceLoadStore);
+      // Specify surface
+      struct cudaResourceDesc resDesc;
+      memset(&resDesc, 0, sizeof(resDesc));
+      resDesc.resType = cudaResourceTypeArray;
+
+      // Create the surface objects
+      resDesc.res.array.array = cuInputArray;
+      cudaCreateSurfaceObject(&pYUVSurf_, &resDesc);
+
+      // Create cuda array
+      cudaMalloc(&pYUV_, (size_t) width * height * 1.5);
+
+    }
+
+    // open the codec
     if (avcodec_open2(codecContext_, codec, NULL) < 0) {
       throw(std::runtime_error("cannot open codec!"));
     }
@@ -154,9 +248,13 @@ bool FFMPEGEncoder::openCodec(int width, int height)
     }
     frame_->width = width;
     frame_->height = height;
-    frame_->format = codecContext_->pix_fmt;
+    frame_->format = pixFormat_;
+    if (use_hw_frames_){
+      RCLCPP_INFO_STREAM(logger_, "set frame_->hw_frames_ctx");
+      frame_->hw_frames_ctx = codecContext_->hw_frames_ctx;
+    }
     // allocate image for frame
-    if (
+    if (!use_hw_frames_ &&
       av_image_alloc(
         frame_->data, frame_->linesize, width, height, static_cast<AVPixelFormat>(frame_->format),
         64) < 0) {
@@ -169,6 +267,12 @@ bool FFMPEGEncoder::openCodec(int width, int height)
   } catch (const std::runtime_error & e) {
     RCLCPP_ERROR_STREAM(logger_, e.what());
     if (codecContext_) {
+      // release the cuda context
+      if (use_hw_frames_){
+        av_buffer_unref(&codecContext_->hw_frames_ctx);
+        cudaDestroySurfaceObject(pYUVSurf_);
+        bayer2rgb_free(gpu_vars_);
+      }
       avcodec_close(codecContext_);
       codecContext_ = NULL;
     }
@@ -210,6 +314,17 @@ void strided_copy(
   }
 }
 
+void channel_copy(
+  uint8_t * dest, const int nb_channels, const uint8_t * src, const int src_nb_channels, const int width, const int height) {
+  // assumes 8 bits per channel
+
+    for (int ii = 0; ii < height; ii++) {
+      for (int jj = 0; jj < width ; jj++){
+        memcpy(dest + nb_channels * (width * ii + jj), src + src_nb_channels * (width * ii + jj), src_nb_channels);
+      }
+    }
+}
+
 void FFMPEGEncoder::encodeImage(const cv::Mat & img, const Header & header, const rclcpp::Time & t0)
 {
   Lock lock(mutex_);
@@ -223,25 +338,74 @@ void FFMPEGEncoder::encodeImage(const cv::Mat & img, const Header & header, cons
   const int width = img.cols;
   const int height = img.rows;
   const AVPixelFormat targetFmt = codecContext_->pix_fmt;
-  if (targetFmt == AV_PIX_FMT_BGR24) {
-    const uint8_t * p = img.data;
-    strided_copy(frame_->data[0], frame_->linesize[0], p, width * 3, height, width * 3);
-  } else if (targetFmt == AV_PIX_FMT_YUV420P) {
-    cv::Mat yuv;
-    cv::cvtColor(img, yuv, cv::COLOR_BGR2YUV_I420);
-    const uint8_t * p = yuv.data;
-    // Y
-    strided_copy(frame_->data[0], frame_->linesize[0], p, width, height, width);
-    // U
-    strided_copy(
-      frame_->data[1], frame_->linesize[1], p + width * height, width / 2, height / 2, width / 2);
-    // V
-    strided_copy(
-      frame_->data[2], frame_->linesize[2], p + width * height + width / 2 * height / 2, width / 2,
-      height / 2, width / 2);
+
+  if (use_hw_frames_){
+    //// hw transcode
+    // call cuda transcode function
+    if (inputFormat_ == AV_PIX_FMT_BAYER_RGGB8 && hwFormat_ == AV_PIX_FMT_YUV420P){
+
+	    cudaStream_t stream = NULL;
+      cudaError_t ret_cuda = cudaSuccess;
+
+      //run bayer->rgb kernel function
+      // RCLCPP_INFO(logger_, "running bayer2rgb kernel");
+      ret_cuda = bayer2rgb_process(gpu_vars_, (void*)img.data, &pRGB, &stream, true);
+      if (ret_cuda != cudaSuccess) {
+        RCLCPP_ERROR_STREAM(logger_, "cannot hw convert bayerRG8 to RGB24: " << cudaGetErrorString(ret_cuda));
+        return;
+      }
+      // RCLCPP_INFO(logger_, "running rgb2yuv420p kernel");
+      ret_cuda = rgb2yuv420p_process(pRGB, pYUVSurf_, height, width);
+      if (ret_cuda != cudaSuccess) {
+        RCLCPP_ERROR_STREAM(logger_, "cannot hw convert RGB24 to YUV420P: " << cudaGetErrorString(ret_cuda));
+        return;
+      }
+
+      // construct hw frame
+      // set data[0] to the YUV surface cuda device pointer
+      // RCLCPP_INFO(logger_, "set frame");
+      cudaDeviceSynchronize(); // might not have to call this, or there might be a quicker function
+      frame_->data[0] = (uint8_t*) pYUVSurf_; // cast to the correct pointer type
+      // frame_->data[0] = (uint8_t*) pYUV_;
+    } else {
+      RCLCPP_ERROR_STREAM(logger_, "cannot hw convert format bayerRG8 -> " << (int)hwFormat_);
+      return;
+    }
+
   } else {
-    RCLCPP_ERROR_STREAM(logger_, "cannot convert format bgr8 -> " << (int)codecContext_->pix_fmt);
-    return;
+    // sw transcode
+    if (inputFormat_ == AV_PIX_FMT_BGR24 && targetFmt == AV_PIX_FMT_BGR24) {
+      const uint8_t * p = img.data;
+      strided_copy(frame_->data[0], frame_->linesize[0], p, width * 3, height, width * 3);
+    } else if (inputFormat_ == AV_PIX_FMT_RGB24 && targetFmt == AV_PIX_FMT_RGB0) {
+        // 32 bits, RGBXRGBX X is unused
+        const uint8_t * p = img.data;
+        channel_copy(frame_->data[0], 4, p, 3, width, height);
+    }
+    else if (inputFormat_ == AV_PIX_FMT_BGR24 && targetFmt == AV_PIX_FMT_YUV420P) {
+      cv::Mat yuv;
+      cv::cvtColor(img, yuv, cv::COLOR_BGR2YUV_I420);
+      const uint8_t * p = yuv.data;
+      // Y
+      strided_copy(frame_->data[0], frame_->linesize[0], p, width, height, width);
+      // U
+      strided_copy(
+        frame_->data[1], frame_->linesize[1], p + width * height, width / 2, height / 2, width / 2);
+      // V
+      strided_copy(
+        frame_->data[2], frame_->linesize[2], p + width * height + width / 2 * height / 2, width / 2,
+        height / 2, width / 2);
+    } else if (inputFormat_ == AV_PIX_FMT_YUV444P && targetFmt == AV_PIX_FMT_YUV444P) {
+      // https://www.flir.com/support-center/iis/machine-vision/knowledge-base/understanding-yuv-data-formats/
+      // The YUV444 data format transmits 24 bits per pixel. Each pixel is assigned unique Y, U and V values—1 byte for each value,
+      // just check to make sure this is the format coming off the camera.
+      // (for us it should be)
+      frame_->data[0] = img.data;
+    }
+      else {
+      RCLCPP_ERROR_STREAM(logger_, "cannot convert format bgr8 -> " << (int)codecContext_->pix_fmt);
+      return;
+    }
   }
   if (measurePerformance_) {
     t2 = rclcpp::Clock().now();
@@ -251,7 +415,40 @@ void FFMPEGEncoder::encodeImage(const cv::Mat & img, const Header & header, cons
   frame_->pts = pts_++;  //
   ptsToStamp_.insert(PTSMap::value_type(frame_->pts, header.stamp));
 
+  ///// DEBUG /////
+  char buf[100];
+  int ret_i = avcodec_is_open(codecContext_); RCLCPP_INFO_STREAM(logger_, "\n\navcodec_is_open error: " << ret_i);
+  ret_i = av_codec_is_encoder(codecContext_->codec); RCLCPP_INFO_STREAM(logger_, "av_codec_is_encoder error: " << ret_i);
+  if (frame_->extended_data != frame_->data){ RCLCPP_INFO_STREAM(logger_, "frame_->extended_data != frame_->data"); }
+  auto avhwctx = (AVHWFramesContext*) frame_->hw_frames_ctx->data;
+  RCLCPP_INFO_STREAM(logger_, "frame_ format: " << av_get_pix_fmt_name(avhwctx->format) << " width: " << avhwctx->width << " height: " << avhwctx->height);
+  AVPixelFormat* fmts;
+  if (!av_hwframe_transfer_get_formats(frame_->hw_frames_ctx, AV_HWFRAME_TRANSFER_DIRECTION_FROM, &fmts, 0)){
+    for (AVPixelFormat* it = fmts; *it != AV_PIX_FMT_NONE; it++){
+      RCLCPP_INFO_STREAM(logger_, "av_hwframe_transfer_get_formats: " << av_get_pix_fmt_name(*it));
+    }
+  }
+
+  AVFrame* frameb; AVFrame* framea;
+  frameb = av_frame_alloc(); framea = av_frame_alloc();
+  frameb->width = frame_->width; framea->width = frame_->width;
+  frameb->height = frame_->height; framea->height = frame_->height;
+  frameb->format = frame_->format; framea->format = frame_->format;
+  ret_i = av_frame_copy(frameb, frame_); av_strerror(ret_i, buf, 100); RCLCPP_INFO_STREAM(logger_, "av_frame_copy error: " << buf);
+  ret_i = av_frame_ref(frameb, frame_); av_strerror(ret_i, buf, 100); RCLCPP_INFO_STREAM(logger_, "av_frame_ref error: " << buf);
+  ret_i = av_hwframe_transfer_data(frameb, frame_, 0); av_strerror(ret_i, buf, 100); RCLCPP_INFO_STREAM(logger_, "av_hwframe_transfer_data error: " << buf);
+
+
+  /////////////////////
+
   int ret = avcodec_send_frame(codecContext_, frame_);
+  if (ret != 0){
+    char buf[100];
+    av_strerror(ret, buf, 100);
+    RCLCPP_INFO_STREAM(logger_, "avcodec_send_frame error: " << buf);
+  }
+  RCLCPP_INFO(logger_, "success: avcode_send_frame");
+
   if (measurePerformance_) {
     t3 = rclcpp::Clock().now();
     tdiffSendFrame_.update((t3 - t2).seconds());
