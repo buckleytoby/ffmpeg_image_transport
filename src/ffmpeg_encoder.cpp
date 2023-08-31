@@ -125,7 +125,7 @@ bool FFMPEGEncoder::openCodec(int width, int height)
       throw(std::runtime_error("h264_nvmpi must have horiz rez mult of 64"));
     }
     // find codec
-    AVCodec * codec = avcodec_find_encoder_by_name(codecName_.c_str());
+    const AVCodec * codec = avcodec_find_encoder_by_name(codecName_.c_str());
     if (!codec) {
       throw(std::runtime_error("cannot find codec: " + codecName_));
     }
@@ -248,10 +248,12 @@ bool FFMPEGEncoder::openCodec(int width, int height)
     }
     frame_->width = width;
     frame_->height = height;
+    frame_->quality = 10; // default for qmax
     frame_->format = pixFormat_;
     if (use_hw_frames_){
       RCLCPP_INFO_STREAM(logger_, "set frame_->hw_frames_ctx");
       frame_->hw_frames_ctx = codecContext_->hw_frames_ctx;
+      frame_->linesize[0] = width; // nb of bytes per line of the YUV image
     }
     // allocate image for frame
     if (!use_hw_frames_ &&
@@ -259,6 +261,11 @@ bool FFMPEGEncoder::openCodec(int width, int height)
         frame_->data, frame_->linesize, width, height, static_cast<AVPixelFormat>(frame_->format),
         64) < 0) {
       throw(std::runtime_error("cannot alloc image!"));
+    } else {
+      // print linesizes
+      RCLCPP_DEBUG_STREAM(
+        logger_, "linesizes: " << frame_->linesize[0] << " " << frame_->linesize[1] << " "
+                               << frame_->linesize[2]);
     }
     // Initialize packet
     packet_ = av_packet_alloc();
@@ -366,7 +373,12 @@ void FFMPEGEncoder::encodeImage(const cv::Mat & img, const Header & header, cons
       // RCLCPP_INFO(logger_, "set frame");
       cudaDeviceSynchronize(); // might not have to call this, or there might be a quicker function
       frame_->data[0] = (uint8_t*) pYUVSurf_; // cast to the correct pointer type
-      // frame_->data[0] = (uint8_t*) pYUV_;
+      frame_->data[0] = (uint8_t*) pYUV_;
+      frame_->data[1] = (uint8_t*) pYUV_;
+      frame_->data[2] = (uint8_t*) pYUV_;
+      frame_->linesize[0] = width; // nb of bytes per line of the YUV image
+      frame_->linesize[1] = width/2; // nb of bytes per line of the YUV image
+      frame_->linesize[2] = width/2; // nb of bytes per line of the YUV image
     } else {
       RCLCPP_ERROR_STREAM(logger_, "cannot hw convert format bayerRG8 -> " << (int)hwFormat_);
       return;
@@ -438,7 +450,8 @@ void FFMPEGEncoder::encodeImage(const cv::Mat & img, const Header & header, cons
   ret_i = av_frame_ref(frameb, frame_); av_strerror(ret_i, buf, 100); RCLCPP_INFO_STREAM(logger_, "av_frame_ref error: " << buf);
   ret_i = av_hwframe_transfer_data(frameb, frame_, 0); av_strerror(ret_i, buf, 100); RCLCPP_INFO_STREAM(logger_, "av_hwframe_transfer_data error: " << buf);
 
-
+  // int ret1 = avcodec_receive_packet(codecContext_, packet_); av_strerror(ret1, buf, 100);
+  // RCLCPP_INFO_STREAM(logger_, "avcodec_receive_packet: " << buf );
   /////////////////////
 
   int ret = avcodec_send_frame(codecContext_, frame_);

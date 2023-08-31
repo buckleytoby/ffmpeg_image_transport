@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -86,21 +87,12 @@ void closeCodec()
 
 bool openCodec()
 {
+  int ret;
   codecContext_ = NULL;
-  try {
-    if (codecName_.empty()) {
-      throw(std::runtime_error("no codec set!"));
-    }
     // find codec
-    AVCodec * codec = avcodec_find_encoder_by_name(codecName_.c_str());
-    if (!codec) {
-      throw(std::runtime_error("cannot find codec: " + codecName_));
-    }
+    const AVCodec * codec = avcodec_find_encoder_by_name( codecName_.c_str());
     // allocate codec context
     codecContext_ = avcodec_alloc_context3(codec);
-    if (!codecContext_) {
-      throw(std::runtime_error("cannot allocate codec context!"));
-    }
     codecContext_->bit_rate = bitRate_;
     codecContext_->qmax = qmax_;  // 0: highest, 63: worst quality bound
     codecContext_->width = width;
@@ -121,16 +113,11 @@ bool openCodec()
     codecContext_->pix_fmt = AV_PIX_FMT_CUDA;
 
     // must initialize the hw_frames_ctx
-    AVBufferRef *hw_frames_ref;
-    AVBufferRef *hw_device_context;
-    if (av_hwdevice_ctx_create(&hw_device_context, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, 0)){
-      throw(std::runtime_error("cannot create hwdevice context!"));
-    }
+    AVBufferRef *hw_frames_ref = NULL;
+    AVBufferRef *hw_device_context = NULL;
+    ret = av_hwdevice_ctx_create(&hw_device_context, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, 0);
+    // std::cout<<"av_hwdevice_ctx_create error: " << av_err2str(ret) <<std::endl;
     hw_frames_ref = av_hwframe_ctx_alloc(hw_device_context); // hw_device_context remains in my ownership
-
-    if (hw_frames_ref == NULL){
-      throw(std::runtime_error("cannot allocate hwframe context!"));
-    }
 
     // set up frame info
     auto frame_ctx = (AVHWFramesContext*) hw_frames_ref->data;
@@ -150,31 +137,16 @@ bool openCodec()
 
     // open the codec
     if (avcodec_open2(codecContext_, codec, NULL) < 0) {
-      throw(std::runtime_error("cannot open codec!"));
     }
     frame_ = av_frame_alloc();
     if (!frame_) {
-      throw(std::runtime_error("cannot alloc frame!"));
     }
     frame_->width = width;
     frame_->height = height;
     frame_->format = pixFormat_;
     frame_->hw_frames_ctx = codecContext_->hw_frames_ctx;
     
-  } catch (const std::runtime_error & e) {
-    if (codecContext_) {
-      // release the cuda context
-      av_buffer_unref(&codecContext_->hw_frames_ctx);
-      cudaDestroySurfaceObject(pYUVSurf_);
-      avcodec_close(codecContext_);
-      codecContext_ = NULL;
-    }
-    if (frame_) {
-      av_free(frame_);
-      frame_ = 0;
-    }
-    return (false);
-  }
+  
   return (true);
 }
 
@@ -212,6 +184,8 @@ void encodeImage()
     char buf[100];
     av_strerror(ret, buf, 100);
   }
+
+  ret = avcodec_receive_packet(codecContext_, packet_);
 }
 
 // main function

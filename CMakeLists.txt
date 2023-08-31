@@ -35,13 +35,16 @@ find_package(ffmpeg_image_transport_msgs REQUIRED)
 
 find_package(OpenCV REQUIRED imgproc)
 
-set(FFMPEG_PKGCONFIG "" CACHE STRING "extra path to pkgconfig")
+set(FFMPEG_PKGCONFIG "/home/nuc-haptics/ffmpeg_build/lib/pkgconfig" CACHE STRING "ffmpeg_pkgconfig string")
+set(CMAKE_INSTALL_RPATH "/home/nuc-haptics/ffmpeg_build/lib")
+# set(FFMPEG_PKGCONFIG "" CACHE STRING "ffmpeg_pkgconfig string")
 if("${FFMPEG_PKGCONFIG}" STREQUAL "")
 else()
   message(WARNING "using FFMPEG package from ${FFMPEG_PKGCONFIG}")
 endif()
 
 set(ENV{PKG_CONFIG_PATH} ${FFMPEG_PKGCONFIG})
+message("env pkg_config_path: $ENV{PKG_CONFIG_PATH}")
 find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
@@ -77,18 +80,13 @@ install(TARGETS cuda_encoder EXPORT export_cuda_encoder
   RUNTIME DESTINATION bin)
 ament_export_targets(export_cuda_encoder)
 
-add_executable(test_cuda src/test.cu)
-install(TARGETS test_cuda RUNTIME DESTINATION bin)
-
-add_executable(test_hw_frames src/test_hw_frames.cpp)
-target_include_directories(test_hw_frames PRIVATE
-  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
-  /usr/local/cuda/include/)
-target_link_libraries(test_hw_frames PkgConfig::LIBAV cuda_encoder ${CUDA_LIBRARIES})
-install(TARGETS test_hw_frames RUNTIME DESTINATION bin)
-
 ###### END Cuda ######
+
+###### CUSTOM FFMPEG #####
+set(CUSTOM_FFMPEG_INCLUDES ~/ffmpeg_build/include)
+set(CUSTOM_FFMPEG_LIBS ~/ffmpeg_build/lib)
+
+###### END CUSTOM FFMPEG #####
 
 add_library(
   ${LIBRARY_NAME}
@@ -115,13 +113,6 @@ ament_target_dependencies(${LIBRARY_NAME}
 
 target_link_libraries(${LIBRARY_NAME} opencv_imgproc PkgConfig::LIBAV cuda_encoder ${CUDA_LIBRARIES})
 
-add_executable(test_encoder
-  test/test_encoder.cpp)
-
-target_link_libraries(test_encoder ${LIBRARY_NAME})
-target_include_directories(test_encoder PRIVATE include)
-ament_target_dependencies(test_encoder cv_bridge rclcpp sensor_msgs ffmpeg_image_transport_msgs)
-
 ament_export_dependencies(
   OpenCV
   cv_bridge
@@ -138,9 +129,6 @@ install(TARGETS ${LIBRARY_NAME} EXPORT export_${LIBRARY_NAME}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 
-install(TARGETS test_encoder
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin)
 
 ament_export_targets(export_${LIBRARY_NAME})
 

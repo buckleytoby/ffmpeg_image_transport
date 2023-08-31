@@ -1,0 +1,63 @@
+cmake_minimum_required(VERSION 3.6)
+
+project(test_ffmpeg)
+
+# Default to C++14
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 14)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+#set(CMAKE_EXE_LINKER_FLAGS "-Wl, --enable-new-dtags") 
+set(CMAKE_BUILD_RPATH "/home/nuc-haptics/ffmpeg_build/lib")
+# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl, -rpath='/home/nuc-haptics/ffmpeg_build/lib'")
+
+set(FFMPEG_PKGCONFIG "/home/nuc-haptics/ffmpeg_build/lib/pkgconfig")
+if("${FFMPEG_PKGCONFIG}" STREQUAL "")
+else()
+  message(WARNING "using FFMPEG package from ${FFMPEG_PKGCONFIG}")
+endif()
+
+set(ENV{PKG_CONFIG_PATH} ${FFMPEG_PKGCONFIG})
+message("env pkg_config_path: $ENV{PKG_CONFIG_PATH}")
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+    libavcodec
+    libswresample
+    libswscale
+    libavutil)
+
+
+###### Cuda ######
+set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+set(CUDA_LIBRARIES "libcuda.so")
+enable_language(CUDA)
+find_package(CUDA  REQUIRED)
+include_directories("${CUDA_INCLUDE_DIRS}")
+
+add_executable(test_cuda src/test.cu)
+install(TARGETS test_cuda RUNTIME DESTINATION bin)
+target_compile_options(test_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                       --disable-warnings
+                       >)
+
+add_executable(test_hw_frames src/test_hw_frames.cpp)
+target_include_directories(test_hw_frames PRIVATE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  /usr/local/cuda/include/)
+target_link_libraries(test_hw_frames PkgConfig::LIBAV ${CUDA_LIBRARIES})
+
+
+
+###### END Cuda ######
+
+###### CUSTOM FFMPEG #####
+set(CUSTOM_FFMPEG_INCLUDES ~/ffmpeg_build/include)
+set(CUSTOM_FFMPEG_LIBS ~/ffmpeg_build/lib)
+
+###### END CUSTOM FFMPEG #####
