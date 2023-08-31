@@ -354,7 +354,7 @@ __host__ __device__ int rgb2v(int R, int G, int B){
   return (unsigned char)((V<0)? 0 : ((V > 255) ? 255 : V));}
 
 //kernel function to convert rgb to yuv420p
-__global__ void rgb2yuv420p(uint8_t *d_in, cudaSurfaceObject_t outputSurfObj,
+__global__ void rgb2yuv420p(uint8_t *d_in, uint8_t *d_out,
                                uint imgheight, uint imgwidth)
 {
 
@@ -372,22 +372,19 @@ __global__ void rgb2yuv420p(uint8_t *d_in, cudaSurfaceObject_t outputSurfObj,
         g = int(d_in[global_offset + GREEN]);
         b = int(d_in[global_offset + BLUE]);
 
-        surf2Dwrite(rgb2y(r,g,b), outputSurfObj, col_num, row_num);
+        d_out[row_num * imgwidth + col_num] = rgb2y(r,g,b);
 		// https://stackoverflow.com/questions/27822017/planar-yuv420-data-layout
 
         if(((threadIdx.x & 1) == 0)  && ((threadIdx.y & 1) == 0)){ // 1 = 0001
-            int u_x = (col_num>>1);
-            int u_y = imgheight+(row_num>>1);
-            surf2Dwrite(rgb2u(r,g,b), outputSurfObj, u_x, u_y);
-
-            int v_x = (imgwidth / 2) + u_x;
-            int v_y = u_y;
-            surf2Dwrite(rgb2v(r,g,b), outputSurfObj, v_x, v_y);
+			int u_offset = imgwidth*imgheight+((row_num>>1)*(imgwidth>>1))+(col_num>>1);
+            d_out[u_offset] = rgb2u(r,g,b);
+            int v_offset = u_offset+((imgheight>>1)*(imgwidth>>1));
+            d_out[v_offset] = rgb2v(r,g,b);
         }
     }
 }
 
-cudaError_t rgb2yuv420p_process(uint8_t *d_in, cudaSurfaceObject_t outputSurfObj,
+cudaError_t rgb2yuv420p_process(uint8_t *d_in, uint8_t *d_out,
                                uint imgheight, uint imgwidth)
 {
 	cudaError_t ret_val;
@@ -396,7 +393,7 @@ cudaError_t rgb2yuv420p_process(uint8_t *d_in, cudaSurfaceObject_t outputSurfObj
 					(imgheight + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
 	//run rgb->yuv420p kernel function
-	rgb2yuv420p<<<blocksPerGrid, threadsPerBlock>>>(d_in, outputSurfObj, imgheight, imgwidth);
+	rgb2yuv420p<<<blocksPerGrid, threadsPerBlock>>>(d_in, d_out, imgheight, imgwidth);
 
 	return cudaSuccess;
 }

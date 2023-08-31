@@ -35,9 +35,9 @@ find_package(ffmpeg_image_transport_msgs REQUIRED)
 
 find_package(OpenCV REQUIRED imgproc)
 
-set(FFMPEG_PKGCONFIG "/home/nuc-haptics/ffmpeg_build/lib/pkgconfig" CACHE STRING "ffmpeg_pkgconfig string")
-set(CMAKE_INSTALL_RPATH "/home/nuc-haptics/ffmpeg_build/lib")
-# set(FFMPEG_PKGCONFIG "" CACHE STRING "ffmpeg_pkgconfig string")
+#set(FFMPEG_PKGCONFIG "/home/nuc-haptics/ffmpeg_build/lib/pkgconfig" CACHE STRING "ffmpeg_pkgconfig string")
+#set(CMAKE_INSTALL_RPATH "/home/nuc-haptics/ffmpeg_build/lib")
+set(FFMPEG_PKGCONFIG "" CACHE STRING "ffmpeg_pkgconfig string")
 if("${FFMPEG_PKGCONFIG}" STREQUAL "")
 else()
   message(WARNING "using FFMPEG package from ${FFMPEG_PKGCONFIG}")

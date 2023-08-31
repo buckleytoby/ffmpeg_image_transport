@@ -145,6 +145,7 @@ private:
   int64_t bitRate_{1000000};
   // libav state
   AVCodecContext * codecContext_{NULL};
+  AVBufferRef *hw_device_context;
   AVFrame * frame_{NULL};
   AVPacket * packet_;
   int64_t pts_{0};

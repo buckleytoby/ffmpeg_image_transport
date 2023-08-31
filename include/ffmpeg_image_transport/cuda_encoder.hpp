@@ -14,7 +14,7 @@ cudaError_t bayer2rgb_free(struct cuda_vars *gpu_vars);
 
 cudaError_t bayer2rgb_process(struct cuda_vars *gpu_vars, const void *p,
 		uint8_t **output, cudaStream_t *stream, bool get_dev_ptr);
-cudaError_t rgb2yuv420p_process(uint8_t *d_in, cudaSurfaceObject_t outputSurfObj,
+cudaError_t rgb2yuv420p_process(uint8_t *d_in, uint8_t *d_out,
                                uint imgheight, uint imgwidth);
 		
 int test_cuda(void);

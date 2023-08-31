@@ -145,6 +145,7 @@ bool openCodec()
     frame_->height = height;
     frame_->format = pixFormat_;
     frame_->hw_frames_ctx = codecContext_->hw_frames_ctx;
+    frame_->buf[0] = av_buffer_alloc(1); // must be set so that send_frame will copy over the hw_frames_ctx
     
   
   return (true);
@@ -184,6 +185,9 @@ void encodeImage()
     char buf[100];
     av_strerror(ret, buf, 100);
   }
+  packet_ = av_packet_alloc();
+  packet_->data = NULL;
+  packet_->size = 0;
 
   ret = avcodec_receive_packet(codecContext_, packet_);
 }
