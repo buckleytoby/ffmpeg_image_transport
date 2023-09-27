@@ -196,6 +196,9 @@ int test_cuda(void)
 
   // Perform SAXPY on 1M elements
   saxpy<<<(N+255)/256, 256>>>(N, 2.0f, d_x, d_y);
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) 
+		printf("Error: %s\n", cudaGetErrorString(err));
 
   cudaMemcpy(y, d_y, N*sizeof(float), cudaMemcpyDeviceToHost);
 
@@ -234,6 +237,10 @@ cudaError_t bayer2rgb_process(struct cuda_vars *gpu_vars, const void *p,
 			gpu_vars->width, gpu_vars->height, gpu_vars->bpp,
 			gpu_vars->pos_r, gpu_vars->pos_gr,
 			gpu_vars->pos_gb, gpu_vars->pos_b);
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) 
+		printf("Error: %s\n", cudaGetErrorString(err));
+
 
 	if (get_dev_ptr) {
 		*output = (uint8_t *)gpu_vars->d_bilinear;
@@ -394,6 +401,9 @@ cudaError_t rgb2yuv420p_process(uint8_t *d_in, uint8_t *d_out,
 
 	//run rgb->yuv420p kernel function
 	rgb2yuv420p<<<blocksPerGrid, threadsPerBlock>>>(d_in, d_out, imgheight, imgwidth);
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) 
+		printf("Error: %s\n", cudaGetErrorString(err));
 
 	return cudaSuccess;
 }
