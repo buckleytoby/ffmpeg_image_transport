@@ -58,7 +58,7 @@ set(LIBRARY_NAME ${PROJECT_NAME}_component)
 
 
 ###### Cuda ######
-set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+set(CMAKE_CUDA_COMPILER /usr/bin/nvcc)
 set(CUDA_LIBRARIES "libcuda.so")
 enable_language(CUDA)
 find_package(CUDA  REQUIRED)
@@ -69,7 +69,7 @@ include_directories("${CUDA_INCLUDE_DIRS}")
 
 add_library(cuda_encoder SHARED src/cuda_encoder.cu)
 target_include_directories(cuda_encoder PRIVATE include)
-target_include_directories(cuda_encoder PRIVATE /usr/local/cuda/include/)
+target_include_directories(cuda_encoder PRIVATE /usr/include/)
 target_compile_options(cuda_encoder PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                        --disable-warnings
                        >)
@@ -101,7 +101,7 @@ add_library(
 target_include_directories(${LIBRARY_NAME} PRIVATE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
-  /usr/local/cuda/include/)
+  /usr/include/)
 
 ament_target_dependencies(${LIBRARY_NAME}
   cv_bridge

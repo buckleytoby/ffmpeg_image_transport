@@ -24,7 +24,7 @@
 
 #include "ffmpeg_image_transport/safe_param.hpp"
 
-bool DEBUG = false;
+
 
 namespace ffmpeg_image_transport
 {
@@ -371,6 +371,15 @@ void FFMPEGEncoder::encodeImage(const cv::Mat & img, const Header & header, cons
       frame_->linesize[0] = width; // nb of bytes per line of the YUV image
       // frame_->linesize[1] = width/2; // nb of bytes per line of the YUV image
       // frame_->linesize[2] = width/2; // nb of bytes per line of the YUV image
+      if (DEBUG){
+        // copy to system and save image
+        char* pHostRGB;
+        int size = width * height * 3 * sizeof(uint8_t);
+        pHostRGB = (char*) malloc(size);
+        cudaMemcpy(pHostRGB, pRGB, size, cudaMemcpyDeviceToHost);
+        cv::Mat imgRGB(height, width, CV_8UC3, pHostRGB);
+        cv::imwrite("rgb.jpg", imgRGB);
+      }
     } else {
       RCLCPP_ERROR_STREAM(logger_, "cannot hw convert format bayerRG8 -> " << (int)hwFormat_);
       return;

@@ -45,6 +45,9 @@ namespace ffmpeg_image_transport
 {
 class FFMPEGEncoder
 {
+private:
+  bool DEBUG = false;
+
 public:
   using Lock = std::unique_lock<std::recursive_mutex>;
   using Callback = std::function<void(const FFMPEGPacketConstPtr & pkt)>;
