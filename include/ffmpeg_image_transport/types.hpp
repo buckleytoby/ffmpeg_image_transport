@@ -17,6 +17,7 @@
 #define FFMPEG_IMAGE_TRANSPORT__TYPES_HPP_
 
 #include <ffmpeg_image_transport_msgs/msg/ffmpeg_packet.hpp>
+#include <ffmpeg_image_transport_msgs/msg/ffmpeg_transform.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/header.hpp>
 
